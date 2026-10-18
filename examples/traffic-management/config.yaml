@@ -1,0 +1,45 @@
+# yaml-language-server: $schema=../../schemas/cloud-run-config.schema.json
+#
+# Revisions and traffic: a canary and a blue/green setup.
+#
+# Every deploy creates a revision. Naming revisions (template.revision) lets
+# traffic point at them; tags give a revision its own URL
+# (https://TAG---SERVICE-HASH.run.app) for testing before it takes traffic.
+
+defaults:
+  region: us-central1
+  services:
+    deletion_protection: false
+    invokers: [allUsers]
+
+services:
+  # 90% stays on the previous release, 10% goes to the new one. The tagged
+  # targets can be called directly through their tag URLs.
+  checkout:
+    template:
+      revision: checkout-${new_release}
+      containers:
+        - image: ${registry}/checkout:${new_release}
+    traffic:
+      - { type: REVISION, revision: "checkout-${old_release}", percent: 90, tag: stable }
+      - { type: REVISION, revision: "checkout-${new_release}", percent: 10, tag: canary }
+
+  # Blue/green: the new revision is deployed with 0% traffic and a "green" tag
+  # for smoke tests; switching means moving the 100 to the green entry.
+  search:
+    template:
+      revision: search-${new_release}
+      containers:
+        - image: ${registry}/search:${new_release}
+    traffic:
+      - { type: REVISION, revision: "search-${old_release}", percent: 100, tag: blue }
+      - { type: REVISION, revision: "search-${new_release}", percent: 0, tag: green }
+
+  # Always the latest revision, plus a stable tag on a pinned one.
+  docs:
+    template:
+      containers:
+        - image: ${registry}/docs:${new_release}
+    traffic:
+      - { type: LATEST, percent: 100 }
+      - { type: REVISION, revision: docs-pinned, percent: 0, tag: pinned }

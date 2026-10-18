@@ -1,0 +1,2087 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/dsbip/terraform-google-cloud-run-yaml/schemas/cloud-run-config.schema.json",
+  "title": "Cloud Run YAML configuration",
+  "description": "Configuration file of the terraform-google-cloud-run-yaml module.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "Default project for every service and job in this file. Takes precedence over the module's project_id variable; a service- or job-level project_id takes precedence over this."
+    },
+    "defaults": {
+      "$ref": "#/definitions/defaults"
+    },
+    "services": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Cloud Run services keyed by logical key (the default service name).",
+      "additionalProperties": {
+        "$ref": "#/definitions/service"
+      }
+    },
+    "jobs": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Cloud Run jobs keyed by logical key (the default job name).",
+      "additionalProperties": {
+        "$ref": "#/definitions/job"
+      }
+    }
+  },
+  "definitions": {
+    "template_placeholder": {
+      "type": "string",
+      "description": "A ${...} placeholder, replaced when the module renders the file with templatefile().",
+      "pattern": "^.*\\$\\{[^}]+\\}.*$"
+    },
+    "labels": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Key/value labels. Numbers and booleans are converted to strings.",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean"
+        ]
+      }
+    },
+    "annotations": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Key/value annotations.",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean"
+        ]
+      }
+    },
+    "env_vars": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Environment variables.",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean"
+        ]
+      }
+    },
+    "deletion_policy": {
+      "description": "Provider-level deletion policy. PREVENT makes terraform destroy fail; ABANDON removes the resource from state without deleting it.",
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "DELETE",
+            "PREVENT",
+            "ABANDON"
+          ]
+        },
+        {
+          "$ref": "#/definitions/template_placeholder"
+        }
+      ]
+    },
+    "member": {
+      "description": "IAM member: user:, group:, serviceAccount:, domain:, principal://, principalSet://, allUsers or allAuthenticatedUsers.",
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^(allUsers|allAuthenticatedUsers|(user|group|serviceAccount|domain):\\S+|principal(Set)?://\\S+)$"
+        },
+        {
+          "$ref": "#/definitions/template_placeholder"
+        }
+      ]
+    },
+    "iam_condition": {
+      "type": "object",
+      "description": "IAM condition (CEL).",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Condition title."
+        },
+        "expression": {
+          "type": "string",
+          "description": "CEL expression."
+        },
+        "description": {
+          "type": "string",
+          "description": "Condition description."
+        }
+      },
+      "required": [
+        "title",
+        "expression"
+      ]
+    },
+    "iam_binding": {
+      "type": "object",
+      "description": "Grants one IAM role to one or more members (non-authoritative, one *_iam_member per member).",
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "type": "string",
+          "description": "IAM role, e.g. roles/run.developer."
+        },
+        "members": {
+          "type": "array",
+          "description": "Members to grant the role to.",
+          "items": {
+            "$ref": "#/definitions/member"
+          },
+          "minItems": 1
+        },
+        "condition": {
+          "$ref": "#/definitions/iam_condition"
+        }
+      },
+      "required": [
+        "role",
+        "members"
+      ]
+    },
+    "defaults": {
+      "type": "object",
+      "description": "Values applied to every service and job unless it sets its own. See docs/configuration.md for the merge rules.",
+      "additionalProperties": false,
+      "properties": {
+        "region": {
+          "type": "string",
+          "description": "Default region of every service and job. Takes precedence over the module's region variable."
+        },
+        "labels": {
+          "description": "Labels added to every service and job.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/labels"
+            }
+          ]
+        },
+        "services": {
+          "description": "Default service settings, merged underneath every service (mappings merge up to three levels deep; lists and other values are replaced).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/service"
+            },
+            {
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "name"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "jobs": {
+          "description": "Default job settings, merged underneath every job.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/job"
+            },
+            {
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "name"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "service_container": {
+          "description": "Default container settings, merged underneath every container of every service (up to three levels deep).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/service_container"
+            },
+            {
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "name"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "job_container": {
+          "description": "Default container settings, merged underneath every container of every job.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/job_container"
+            },
+            {
+              "propertyNames": {
+                "not": {
+                  "enum": [
+                    "name"
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "service": {
+      "type": "object",
+      "description": "A Cloud Run service.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Set to false to skip this service (default true). It is still validated.",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "name": {
+          "description": "Service name (default: the key). Lowercase letters, digits and hyphens, starting with a letter, at most 49 characters.",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z]([-a-z0-9]{0,47}[a-z0-9])?$"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "project_id": {
+          "type": "string",
+          "description": "Project of this service. Takes precedence over the top-level project_id."
+        },
+        "region": {
+          "type": "string",
+          "description": "Region of this service. Takes precedence over defaults.region."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description."
+        },
+        "labels": {
+          "description": "Labels, merged over defaults.labels and defaults.services.labels.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/labels"
+            }
+          ]
+        },
+        "annotations": {
+          "description": "Service annotations (not revision annotations; those go in template.annotations).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/annotations"
+            }
+          ]
+        },
+        "client": {
+          "type": "string",
+          "description": "Name of the client that last deployed the service, e.g. terraform."
+        },
+        "client_version": {
+          "type": "string",
+          "description": "Version of that client."
+        },
+        "ingress": {
+          "description": "Which traffic may reach the service.",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "INGRESS_TRAFFIC_ALL",
+                "INGRESS_TRAFFIC_INTERNAL_ONLY",
+                "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
+              ]
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "launch_stage": {
+          "description": "Launch stage; set BETA or ALPHA to use preview features.",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "GA",
+                "BETA",
+                "ALPHA"
+              ]
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "deletion_protection": {
+          "description": "Whether terraform destroy may delete the service. The provider default is true: set false for services that may be destroyed.",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "deletion_policy": {
+          "$ref": "#/definitions/deletion_policy"
+        },
+        "custom_audiences": {
+          "type": "array",
+          "description": "Extra audiences accepted in ID tokens for this service.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "default_uri_disabled": {
+          "description": "Disable the run.app URL (only reachable through a load balancer or custom domain).",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "invoker_iam_disabled": {
+          "description": "Skip the IAM invoker check: anyone who can reach the service may call it (public without allUsers).",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "iap_enabled": {
+          "description": "Put Identity-Aware Proxy in front of the service.",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "binary_authorization": {
+          "$ref": "#/definitions/binary_authorization"
+        },
+        "scaling": {
+          "$ref": "#/definitions/service_scaling"
+        },
+        "template": {
+          "$ref": "#/definitions/service_template"
+        },
+        "traffic": {
+          "type": "array",
+          "description": "Traffic split between revisions. Default: 100% to the latest revision.",
+          "items": {
+            "$ref": "#/definitions/traffic"
+          }
+        },
+        "invokers": {
+          "type": "array",
+          "description": "Members allowed to call the service (roles/run.invoker). allUsers makes it public.",
+          "items": {
+            "$ref": "#/definitions/member"
+          }
+        },
+        "iam": {
+          "type": "array",
+          "description": "Additional IAM grants on the service.",
+          "items": {
+            "$ref": "#/definitions/iam_binding"
+          }
+        },
+        "schedules": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "Cloud Scheduler jobs that call the service on a schedule, keyed by name.",
+          "additionalProperties": {
+            "$ref": "#/definitions/service_schedule"
+          }
+        }
+      }
+    },
+    "binary_authorization": {
+      "type": "object",
+      "description": "Binary Authorization settings.",
+      "additionalProperties": false,
+      "properties": {
+        "use_default": {
+          "description": "Use the project's default policy.",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "policy": {
+          "type": "string",
+          "description": "Policy name: projects/P/platforms/cloudRun/policies/NAME."
+        },
+        "breakglass_justification": {
+          "type": "string",
+          "description": "Justification to bypass the policy (break-glass)."
+        }
+      }
+    },
+    "service_scaling": {
+      "type": "object",
+      "description": "Service-level scaling (all revisions together).",
+      "additionalProperties": false,
+      "properties": {
+        "min_instance_count": {
+          "description": "Minimum instances across the service.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "max_instance_count": {
+          "description": "Maximum instances across the service.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "manual_instance_count": {
+          "description": "Instances with scaling_mode MANUAL.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "scaling_mode": {
+          "description": "AUTOMATIC (default) or MANUAL.",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "AUTOMATIC",
+                "MANUAL"
+              ]
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        }
+      }
+    },
+    "service_template": {
+      "type": "object",
+      "description": "The revision template: containers, volumes, scaling and networking of new revisions.",
+      "additionalProperties": false,
+      "properties": {
+        "revision": {
+          "type": "string",
+          "description": "Revision name (must start with the service name followed by a hyphen). Default: generated."
+        },
+        "labels": {
+          "description": "Revision labels.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/labels"
+            }
+          ]
+        },
+        "annotations": {
+          "description": "Revision annotations.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/annotations"
+            }
+          ]
+        },
+        "timeout": {
+          "description": "Request timeout, e.g. 300s (up to 3600s).",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]{1,9})?s$"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "service_account": {
+          "type": "string",
+          "description": "Runtime service account email."
+        },
+        "execution_environment": {
+          "description": "Execution environment.",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "EXECUTION_ENVIRONMENT_GEN1",
+                "EXECUTION_ENVIRONMENT_GEN2"
+              ]
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "encryption_key": {
+          "type": "string",
+          "description": "Cloud KMS key for the image (CMEK)."
+        },
+        "max_instance_request_concurrency": {
+          "description": "Concurrent requests per instance.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "session_affinity": {
+          "description": "Route a client's requests to the same instance.",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "gpu_zonal_redundancy_disabled": {
+          "description": "Use GPUs without zonal redundancy (cheaper).",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "health_check_disabled": {
+          "description": "Disable the default TCP startup check.",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "scaling": {
+          "$ref": "#/definitions/revision_scaling"
+        },
+        "vpc_access": {
+          "$ref": "#/definitions/vpc_access"
+        },
+        "node_selector": {
+          "$ref": "#/definitions/node_selector"
+        },
+        "containers": {
+          "type": "array",
+          "description": "Containers: the ingress container and optional sidecars.",
+          "items": {
+            "$ref": "#/definitions/service_container"
+          },
+          "minItems": 1,
+          "maxItems": 10
+        },
+        "volumes": {
+          "type": "array",
+          "description": "Volumes the containers can mount.",
+          "items": {
+            "$ref": "#/definitions/volume"
+          }
+        }
+      }
+    },
+    "revision_scaling": {
+      "type": "object",
+      "description": "Per-revision autoscaling.",
+      "additionalProperties": false,
+      "properties": {
+        "min_instance_count": {
+          "description": "Instances kept warm.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "max_instance_count": {
+          "description": "Upper bound of instances.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        }
+      }
+    },
+    "vpc_access": {
+      "type": "object",
+      "description": "VPC egress: a Serverless VPC Access connector or Direct VPC network interfaces.",
+      "additionalProperties": false,
+      "properties": {
+        "connector": {
+          "type": "string",
+          "description": "Connector: projects/P/locations/R/connectors/C."
+        },
+        "egress": {
+          "description": "Which traffic goes through the VPC.",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "ALL_TRAFFIC",
+                "PRIVATE_RANGES_ONLY"
+              ]
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "network_interfaces": {
+          "type": "array",
+          "description": "Direct VPC egress interfaces (instead of a connector).",
+          "items": {
+            "$ref": "#/definitions/network_interface"
+          }
+        }
+      }
+    },
+    "network_interface": {
+      "type": "object",
+      "description": "A Direct VPC network interface.",
+      "additionalProperties": false,
+      "properties": {
+        "network": {
+          "type": "string",
+          "description": "VPC network name or self link."
+        },
+        "subnetwork": {
+          "type": "string",
+          "description": "Subnetwork name or self link."
+        },
+        "tags": {
+          "type": "array",
+          "description": "Network tags.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "node_selector": {
+      "type": "object",
+      "description": "Hardware selection.",
+      "additionalProperties": false,
+      "properties": {
+        "accelerator": {
+          "type": "string",
+          "description": "GPU type, e.g. nvidia-l4."
+        }
+      },
+      "required": [
+        "accelerator"
+      ]
+    },
+    "service_container": {
+      "type": "object",
+      "description": "A container of a service.",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Container name. Required when the template has several containers (for depends_on and overrides)."
+        },
+        "image": {
+          "type": "string",
+          "description": "Container image, e.g. europe-docker.pkg.dev/P/repo/app:1.2.3 or us-docker.pkg.dev/cloudrun/container/hello."
+        },
+        "command": {
+          "type": "array",
+          "description": "Entrypoint (replaces the image's ENTRYPOINT).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "args": {
+          "type": "array",
+          "description": "Arguments (replace the image's CMD).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "working_dir": {
+          "type": "string",
+          "description": "Working directory."
+        },
+        "depends_on": {
+          "type": "array",
+          "description": "Names of containers that must start (and pass their startup probe) before this one.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "env": {
+          "description": "Plain environment variables. Numbers and booleans become strings.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/env_vars"
+            }
+          ]
+        },
+        "secret_env": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "Environment variables from Secret Manager, NAME: { secret, version }.",
+          "additionalProperties": {
+            "$ref": "#/definitions/secret_key_ref"
+          }
+        },
+        "volume_mounts": {
+          "type": "array",
+          "description": "Volumes mounted into this container.",
+          "items": {
+            "$ref": "#/definitions/volume_mount"
+          }
+        },
+        "startup_probe": {
+          "$ref": "#/definitions/probe"
+        },
+        "base_image_uri": {
+          "type": "string",
+          "description": "Base image for automatic base image updates."
+        },
+        "resources": {
+          "$ref": "#/definitions/service_resources"
+        },
+        "ports": {
+          "$ref": "#/definitions/port"
+        },
+        "liveness_probe": {
+          "$ref": "#/definitions/probe"
+        },
+        "readiness_probe": {
+          "$ref": "#/definitions/readiness_probe"
+        }
+      }
+    },
+    "service_resources": {
+      "type": "object",
+      "description": "Compute resources of a service container.",
+      "additionalProperties": false,
+      "properties": {
+        "limits": {
+          "$ref": "#/definitions/resource_limits"
+        },
+        "cpu_idle": {
+          "description": "Throttle CPU outside requests (request-based billing; default true). false: instance-based billing.",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "startup_cpu_boost": {
+          "description": "Extra CPU during startup.",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        }
+      }
+    },
+    "resource_limits": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Resource limits, e.g. { cpu: \"2\", memory: 1Gi, nvidia.com/gpu: \"1\" }.",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean"
+        ]
+      }
+    },
+    "port": {
+      "type": "object",
+      "description": "The port the ingress container listens on.",
+      "additionalProperties": false,
+      "properties": {
+        "container_port": {
+          "description": "Port number (default 8080).",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "name": {
+          "description": "Protocol: http1 (default) or h2c (HTTP/2 end-to-end, gRPC).",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "http1",
+                "h2c"
+              ]
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        }
+      }
+    },
+    "probe": {
+      "type": "object",
+      "description": "A startup or liveness probe. Set one of http_get, tcp_socket and grpc.",
+      "additionalProperties": false,
+      "properties": {
+        "initial_delay_seconds": {
+          "description": "Seconds before the first probe.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 240
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "timeout_seconds": {
+          "description": "Seconds before a probe times out.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 240
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "period_seconds": {
+          "description": "Seconds between probes.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 240
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "failure_threshold": {
+          "description": "Failures before the container is restarted (or the start fails).",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "http_get": {
+          "$ref": "#/definitions/http_get"
+        },
+        "tcp_socket": {
+          "$ref": "#/definitions/tcp_socket"
+        },
+        "grpc": {
+          "$ref": "#/definitions/grpc"
+        }
+      }
+    },
+    "readiness_probe": {
+      "type": "object",
+      "description": "A readiness probe. Set one of http_get and grpc.",
+      "additionalProperties": false,
+      "properties": {
+        "failure_threshold": {
+          "description": "Failures before the instance stops receiving traffic.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "success_threshold": {
+          "description": "Successes before it receives traffic again.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "period_seconds": {
+          "description": "Seconds between probes.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "timeout_seconds": {
+          "description": "Seconds before a probe times out.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "http_get": {
+          "$ref": "#/definitions/readiness_http_get"
+        },
+        "grpc": {
+          "$ref": "#/definitions/grpc"
+        }
+      }
+    },
+    "http_get": {
+      "type": "object",
+      "description": "HTTP GET probe.",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path, e.g. /healthz."
+        },
+        "port": {
+          "description": "Port (default: the container port).",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "http_headers": {
+          "type": "array",
+          "description": "Request headers.",
+          "items": {
+            "$ref": "#/definitions/http_header"
+          }
+        }
+      }
+    },
+    "readiness_http_get": {
+      "type": "object",
+      "description": "HTTP GET readiness probe.",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path, e.g. /ready."
+        },
+        "port": {
+          "description": "Port (default: the container port).",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        }
+      }
+    },
+    "http_header": {
+      "type": "object",
+      "description": "An HTTP header.",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Header name."
+        },
+        "value": {
+          "type": "string",
+          "description": "Header value."
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "tcp_socket": {
+      "type": "object",
+      "description": "TCP probe.",
+      "additionalProperties": false,
+      "properties": {
+        "port": {
+          "description": "Port (default: the container port).",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        }
+      }
+    },
+    "grpc": {
+      "type": "object",
+      "description": "gRPC health check probe.",
+      "additionalProperties": false,
+      "properties": {
+        "port": {
+          "description": "Port (default: the container port).",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "service": {
+          "type": "string",
+          "description": "Service name passed to the gRPC health check."
+        }
+      }
+    },
+    "secret_key_ref": {
+      "type": "object",
+      "description": "A Secret Manager secret version.",
+      "additionalProperties": false,
+      "properties": {
+        "secret": {
+          "type": "string",
+          "description": "Secret ID in the service's project, or projects/P/secrets/S."
+        },
+        "version": {
+          "type": "string",
+          "description": "Version, default latest."
+        }
+      },
+      "required": [
+        "secret"
+      ]
+    },
+    "volume_mount": {
+      "type": "object",
+      "description": "Mounts a volume.",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of a volume of the template."
+        },
+        "mount_path": {
+          "type": "string",
+          "description": "Directory to mount at, e.g. /secrets. Cloud SQL volumes conventionally mount at /cloudsql."
+        },
+        "sub_path": {
+          "type": "string",
+          "description": "Path within the volume to mount instead of its root."
+        }
+      },
+      "required": [
+        "name",
+        "mount_path"
+      ]
+    },
+    "volume": {
+      "type": "object",
+      "description": "A volume. Set exactly one of secret, cloud_sql_instance, empty_dir, gcs and nfs.",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Volume name, referenced by volume_mounts."
+        },
+        "secret": {
+          "$ref": "#/definitions/secret_volume"
+        },
+        "cloud_sql_instance": {
+          "$ref": "#/definitions/cloud_sql_volume"
+        },
+        "empty_dir": {
+          "$ref": "#/definitions/empty_dir_volume"
+        },
+        "gcs": {
+          "$ref": "#/definitions/gcs_volume"
+        },
+        "nfs": {
+          "$ref": "#/definitions/nfs_volume"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
+    "secret_volume": {
+      "type": "object",
+      "description": "Secret Manager secret as files.",
+      "additionalProperties": false,
+      "properties": {
+        "secret": {
+          "type": "string",
+          "description": "Secret ID or projects/P/secrets/S."
+        },
+        "default_mode": {
+          "description": "Mode of all files: an octal string such as \"0444\" (quoted: YAML reads unquoted 0444 as the decimal 444), or a decimal number such as 292.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 511
+            },
+            {
+              "type": "string",
+              "pattern": "^0?[0-7]{3}$"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "items": {
+          "type": "array",
+          "description": "Versions to mount and their file names (default: latest as a file named after the secret).",
+          "items": {
+            "$ref": "#/definitions/secret_item"
+          }
+        }
+      },
+      "required": [
+        "secret"
+      ]
+    },
+    "secret_item": {
+      "type": "object",
+      "description": "A secret version mounted as a file.",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File name relative to the mount path."
+        },
+        "version": {
+          "type": "string",
+          "description": "Version, default latest."
+        },
+        "mode": {
+          "description": "Mode of this file: an octal string such as \"0400\", or a decimal number such as 256.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 511
+            },
+            {
+              "type": "string",
+              "pattern": "^0?[0-7]{3}$"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    "cloud_sql_volume": {
+      "type": "object",
+      "description": "Cloud SQL Auth Proxy sockets.",
+      "additionalProperties": false,
+      "properties": {
+        "instances": {
+          "type": "array",
+          "description": "Instance connection names (project:region:instance).",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "instances"
+      ]
+    },
+    "empty_dir_volume": {
+      "type": "object",
+      "description": "In-memory scratch space.",
+      "additionalProperties": false,
+      "properties": {
+        "medium": {
+          "description": "Storage medium.",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "MEMORY"
+              ]
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "size_limit": {
+          "type": "string",
+          "description": "Size limit, e.g. 512Mi."
+        }
+      }
+    },
+    "gcs_volume": {
+      "type": "object",
+      "description": "A Cloud Storage bucket mounted with Cloud Storage FUSE (needs EXECUTION_ENVIRONMENT_GEN2 for services).",
+      "additionalProperties": false,
+      "properties": {
+        "bucket": {
+          "type": "string",
+          "description": "Bucket name."
+        },
+        "read_only": {
+          "description": "Mount read-only.",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "mount_options": {
+          "type": "array",
+          "description": "gcsfuse mount options, e.g. [implicit-dirs].",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "bucket"
+      ]
+    },
+    "nfs_volume": {
+      "type": "object",
+      "description": "An NFS share (e.g. Filestore).",
+      "additionalProperties": false,
+      "properties": {
+        "server": {
+          "type": "string",
+          "description": "Server IP or hostname."
+        },
+        "path": {
+          "type": "string",
+          "description": "Exported path."
+        },
+        "read_only": {
+          "description": "Mount read-only.",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        }
+      },
+      "required": [
+        "server"
+      ]
+    },
+    "traffic": {
+      "type": "object",
+      "description": "A traffic target.",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "description": "LATEST (newest ready revision) or REVISION (the named revision); the long provider forms are accepted too.",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "LATEST",
+                "REVISION",
+                "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST",
+                "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+              ]
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "revision": {
+          "type": "string",
+          "description": "Revision name, with type REVISION."
+        },
+        "percent": {
+          "description": "Share of traffic.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "tag": {
+          "type": "string",
+          "description": "Tag: the target also gets its own URL https://TAG---SERVICE-HASH.run.app."
+        }
+      }
+    },
+    "service_schedule": {
+      "type": "object",
+      "description": "Calls the service on a schedule with an OIDC token.",
+      "additionalProperties": false,
+      "properties": {
+        "schedule": {
+          "type": "string",
+          "description": "Cron schedule, e.g. \"*/15 * * * *\"."
+        },
+        "time_zone": {
+          "type": "string",
+          "description": "Time zone of the schedule, e.g. Europe/Berlin (default UTC)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of the Cloud Scheduler job."
+        },
+        "paused": {
+          "description": "Create the scheduler job paused.",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "region": {
+          "type": "string",
+          "description": "Cloud Scheduler region (default: the service's region)."
+        },
+        "service_account_email": {
+          "type": "string",
+          "description": "Identity of the call. Needs roles/run.invoker: add it to invokers."
+        },
+        "path": {
+          "description": "Path to call, e.g. /tasks/cleanup (default /).",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^/.*$"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "http_method": {
+          "description": "HTTP method (default POST).",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "POST",
+                "GET",
+                "HEAD",
+                "PUT",
+                "DELETE",
+                "PATCH",
+                "OPTIONS"
+              ]
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "headers": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "Request headers.",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        },
+        "body": {
+          "type": "string",
+          "description": "Request body (plain text; the module encodes it)."
+        },
+        "audience": {
+          "type": "string",
+          "description": "OIDC audience (default: the service URL)."
+        },
+        "attempt_deadline": {
+          "description": "Deadline per attempt, e.g. 320s.",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]{1,9})?s$"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "retry_config": {
+          "$ref": "#/definitions/retry_config"
+        }
+      },
+      "required": [
+        "schedule"
+      ]
+    },
+    "retry_config": {
+      "type": "object",
+      "description": "Cloud Scheduler retries of a failed attempt.",
+      "additionalProperties": false,
+      "properties": {
+        "retry_count": {
+          "description": "Retries (default 0).",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 5
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "max_retry_duration": {
+          "description": "Time limit for retries, e.g. 600s.",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]{1,9})?s$"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "min_backoff_duration": {
+          "description": "Minimum wait between retries, e.g. 5s.",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]{1,9})?s$"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "max_backoff_duration": {
+          "description": "Maximum wait between retries, e.g. 3600s.",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]{1,9})?s$"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "max_doublings": {
+          "description": "How often the wait doubles before growing linearly.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        }
+      }
+    },
+    "job": {
+      "type": "object",
+      "description": "A Cloud Run job.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Set to false to skip this job (default true). It is still validated.",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "name": {
+          "description": "Job name (default: the key). Lowercase letters, digits and hyphens, starting with a letter, at most 63 characters.",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "project_id": {
+          "type": "string",
+          "description": "Project of this job."
+        },
+        "region": {
+          "type": "string",
+          "description": "Region of this job."
+        },
+        "labels": {
+          "description": "Labels, merged over defaults.labels and defaults.jobs.labels.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/labels"
+            }
+          ]
+        },
+        "annotations": {
+          "description": "Job annotations.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/annotations"
+            }
+          ]
+        },
+        "client": {
+          "type": "string",
+          "description": "Name of the client that last deployed the job."
+        },
+        "client_version": {
+          "type": "string",
+          "description": "Version of that client."
+        },
+        "launch_stage": {
+          "description": "Launch stage; set BETA or ALPHA to use preview features.",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "GA",
+                "BETA",
+                "ALPHA"
+              ]
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "deletion_protection": {
+          "description": "Whether terraform destroy may delete the job. The provider default is true.",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "deletion_policy": {
+          "$ref": "#/definitions/deletion_policy"
+        },
+        "binary_authorization": {
+          "$ref": "#/definitions/binary_authorization"
+        },
+        "start_execution_token": {
+          "type": "string",
+          "description": "Change this value to start an execution when the job is created or updated (apply waits until it has started)."
+        },
+        "run_execution_token": {
+          "type": "string",
+          "description": "Change this value to run an execution when the job is created or updated (apply waits until it has completed)."
+        },
+        "template": {
+          "$ref": "#/definitions/job_template"
+        },
+        "invokers": {
+          "type": "array",
+          "description": "Members allowed to execute the job (roles/run.invoker). Scheduler service accounts belong here.",
+          "items": {
+            "$ref": "#/definitions/member"
+          }
+        },
+        "iam": {
+          "type": "array",
+          "description": "Additional IAM grants on the job.",
+          "items": {
+            "$ref": "#/definitions/iam_binding"
+          }
+        },
+        "schedules": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "Cloud Scheduler jobs that execute the job on a schedule, keyed by name.",
+          "additionalProperties": {
+            "$ref": "#/definitions/job_schedule"
+          }
+        }
+      }
+    },
+    "job_template": {
+      "type": "object",
+      "description": "What an execution runs: the provider's execution template and task template in one mapping.",
+      "additionalProperties": false,
+      "properties": {
+        "labels": {
+          "description": "Execution labels.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/labels"
+            }
+          ]
+        },
+        "annotations": {
+          "description": "Execution annotations.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/annotations"
+            }
+          ]
+        },
+        "parallelism": {
+          "description": "Tasks running at the same time (default: as many as possible).",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "task_count": {
+          "description": "Tasks per execution (default 1). Each task gets CLOUD_RUN_TASK_INDEX.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "max_retries": {
+          "description": "Retries per failed task (default 3).",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "timeout": {
+          "description": "Time limit per task attempt, e.g. 3600s.",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]{1,9})?s$"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "service_account": {
+          "type": "string",
+          "description": "Runtime service account email."
+        },
+        "execution_environment": {
+          "description": "Execution environment.",
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "EXECUTION_ENVIRONMENT_GEN1",
+                "EXECUTION_ENVIRONMENT_GEN2"
+              ]
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "encryption_key": {
+          "type": "string",
+          "description": "Cloud KMS key for the image (CMEK)."
+        },
+        "gpu_zonal_redundancy_disabled": {
+          "description": "Use GPUs without zonal redundancy.",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "vpc_access": {
+          "$ref": "#/definitions/vpc_access"
+        },
+        "node_selector": {
+          "$ref": "#/definitions/node_selector"
+        },
+        "containers": {
+          "type": "array",
+          "description": "Containers of each task.",
+          "items": {
+            "$ref": "#/definitions/job_container"
+          },
+          "minItems": 1,
+          "maxItems": 10
+        },
+        "volumes": {
+          "type": "array",
+          "description": "Volumes the containers can mount.",
+          "items": {
+            "$ref": "#/definitions/volume"
+          }
+        }
+      }
+    },
+    "job_container": {
+      "type": "object",
+      "description": "A container of a job task.",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Container name. Required when the template has several containers (for depends_on and overrides)."
+        },
+        "image": {
+          "type": "string",
+          "description": "Container image, e.g. europe-docker.pkg.dev/P/repo/app:1.2.3 or us-docker.pkg.dev/cloudrun/container/hello."
+        },
+        "command": {
+          "type": "array",
+          "description": "Entrypoint (replaces the image's ENTRYPOINT).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "args": {
+          "type": "array",
+          "description": "Arguments (replace the image's CMD).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "working_dir": {
+          "type": "string",
+          "description": "Working directory."
+        },
+        "depends_on": {
+          "type": "array",
+          "description": "Names of containers that must start (and pass their startup probe) before this one.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "env": {
+          "description": "Plain environment variables. Numbers and booleans become strings.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/env_vars"
+            }
+          ]
+        },
+        "secret_env": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "Environment variables from Secret Manager, NAME: { secret, version }.",
+          "additionalProperties": {
+            "$ref": "#/definitions/secret_key_ref"
+          }
+        },
+        "volume_mounts": {
+          "type": "array",
+          "description": "Volumes mounted into this container.",
+          "items": {
+            "$ref": "#/definitions/volume_mount"
+          }
+        },
+        "startup_probe": {
+          "$ref": "#/definitions/probe"
+        },
+        "resources": {
+          "$ref": "#/definitions/job_resources"
+        }
+      }
+    },
+    "job_resources": {
+      "type": "object",
+      "description": "Compute resources of a job container.",
+      "additionalProperties": false,
+      "properties": {
+        "limits": {
+          "$ref": "#/definitions/resource_limits"
+        }
+      }
+    },
+    "job_schedule": {
+      "type": "object",
+      "description": "Executes the job on a schedule (Cloud Run Admin API, OAuth token).",
+      "additionalProperties": false,
+      "properties": {
+        "schedule": {
+          "type": "string",
+          "description": "Cron schedule, e.g. \"0 2 * * *\"."
+        },
+        "time_zone": {
+          "type": "string",
+          "description": "Time zone of the schedule, e.g. Europe/Berlin (default UTC)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of the Cloud Scheduler job."
+        },
+        "paused": {
+          "description": "Create the scheduler job paused.",
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "region": {
+          "type": "string",
+          "description": "Cloud Scheduler region (default: the job's region)."
+        },
+        "service_account_email": {
+          "type": "string",
+          "description": "Identity of the call. Needs roles/run.invoker on the job (add it to invokers), or roles/run.jobsExecutorWithOverrides with overrides."
+        },
+        "attempt_deadline": {
+          "description": "Deadline per attempt, e.g. 320s.",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]{1,9})?s$"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "retry_config": {
+          "$ref": "#/definitions/retry_config"
+        },
+        "overrides": {
+          "$ref": "#/definitions/job_overrides"
+        }
+      },
+      "required": [
+        "schedule"
+      ]
+    },
+    "job_overrides": {
+      "type": "object",
+      "description": "Per-schedule overrides of the execution.",
+      "additionalProperties": false,
+      "properties": {
+        "container": {
+          "type": "string",
+          "description": "Container to override (default: the first)."
+        },
+        "args": {
+          "type": "array",
+          "description": "Arguments for this run.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "env": {
+          "description": "Environment variables for this run.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/env_vars"
+            }
+          ]
+        },
+        "task_count": {
+          "description": "Tasks for this run.",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        },
+        "timeout": {
+          "description": "Task timeout for this run, e.g. 600s.",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]{1,9})?s$"
+            },
+            {
+              "$ref": "#/definitions/template_placeholder"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

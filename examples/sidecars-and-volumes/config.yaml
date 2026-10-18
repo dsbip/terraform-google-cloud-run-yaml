@@ -1,0 +1,114 @@
+# yaml-language-server: $schema=../../schemas/cloud-run-config.schema.json
+#
+# Multi-container services and every volume type:
+#   - web: an nginx ingress container in front of the app, an OpenTelemetry
+#     collector sidecar, startup ordering with depends_on, and an in-memory
+#     volume shared between nginx and the app
+#   - reports: Cloud SQL (Auth Proxy sockets), a Cloud Storage bucket mounted
+#     with Cloud Storage FUSE, a Filestore (NFS) share and secret files
+#
+# With several containers, each needs a name and exactly one (the ingress
+# container) sets ports.
+
+defaults:
+  region: europe-west1
+  services:
+    deletion_protection: false
+    template:
+      execution_environment: EXECUTION_ENVIRONMENT_GEN2   # needed for GCS and NFS volumes
+      service_account: web-runtime@${project_id}.iam.gserviceaccount.com
+
+services:
+  web:
+    description: Web app behind nginx, with an OpenTelemetry sidecar.
+    template:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports: { container_port: 8080 }
+          depends_on: [app]                  # nginx starts once the app is up
+          resources:
+            limits: { cpu: "1", memory: 256Mi }
+          volume_mounts:
+            - { name: nginx-conf, mount_path: /etc/nginx/conf.d }
+            - { name: shared-tmp, mount_path: /var/cache/app }
+        - name: app
+          image: ${registry}/web-app:${version}
+          resources:
+            limits: { cpu: "2", memory: 2Gi }
+          env:
+            OTEL_EXPORTER_OTLP_ENDPOINT: http://localhost:4317
+            CACHE_DIR: /var/cache/app
+          startup_probe:
+            tcp_socket: { port: 9000 }
+            period_seconds: 2
+            failure_threshold: 30
+          volume_mounts:
+            - { name: shared-tmp, mount_path: /var/cache/app }
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:0.111.0
+          args: [--config=/etc/otelcol/config.yaml]
+          resources:
+            limits: { cpu: "0.5", memory: 256Mi }
+          volume_mounts:
+            - { name: otel-config, mount_path: /etc/otelcol }
+      volumes:
+        - name: shared-tmp
+          empty_dir: { medium: MEMORY, size_limit: 256Mi }
+        - name: nginx-conf
+          secret:
+            secret: web-nginx-conf
+            items:
+              - { path: default.conf, version: latest }
+        - name: otel-config
+          secret:
+            secret: otel-collector-config
+            items:
+              - { path: config.yaml }
+            default_mode: "0444"
+    invokers: [allUsers]
+
+  reports:
+    description: Report generation with database, bucket, file share and secrets.
+    template:
+      timeout: 900s
+      vpc_access:
+        network_interfaces:
+          - network: default
+            subnetwork: default
+        egress: PRIVATE_RANGES_ONLY          # Filestore is reached over the VPC
+      containers:
+        - image: ${registry}/reports:${version}
+          resources:
+            limits: { cpu: "2", memory: 4Gi }
+          env:
+            DB_SOCKET: /cloudsql/${project_id}:europe-west1:reports-db
+            REPORT_BUCKET_PATH: /mnt/reports
+          secret_env:
+            DB_PASSWORD: { secret: reports-db-password }
+          volume_mounts:
+            - { name: cloudsql, mount_path: /cloudsql }
+            - { name: report-bucket, mount_path: /mnt/reports }
+            - { name: templates, mount_path: /mnt/templates, sub_path: reports/v2 }
+            - { name: signing-key, mount_path: /secrets }
+      volumes:
+        - name: cloudsql
+          cloud_sql_instance:
+            instances:
+              - ${project_id}:europe-west1:reports-db
+              - ${project_id}:europe-west1:reports-replica
+        - name: report-bucket
+          gcs:
+            bucket: ${project_id}-reports
+            mount_options: [implicit-dirs, "stat-cache-ttl=60s"]
+        - name: templates
+          nfs:
+            server: 10.30.0.2
+            path: /share
+            read_only: true
+        - name: signing-key
+          secret:
+            secret: reports-signing-key
+            items:
+              - { path: key.pem, version: "2", mode: "0400" }
+    invokers: [group:finance@example.com]

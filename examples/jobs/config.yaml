@@ -1,0 +1,107 @@
+# yaml-language-server: $schema=../../schemas/cloud-run-config.schema.json
+#
+# Cloud Run jobs: batch work that runs to completion.
+#   - nightly-etl      100 tasks, 10 at a time, retries, a long timeout,
+#                      Direct VPC egress and Cloud SQL; runs nightly and on
+#                      the first of the month with different arguments
+#   - db-migrate       runs once on every deploy (run_execution_token) and
+#                      the apply waits until it has finished
+#   - thumbnail-backfill  one image, many jobs: the image comes from
+#                      defaults.job_container and only args differ
+#   - cleanup          small job executed by an external workflow; only that
+#                      workflow's service account may run it
+#
+# Scheduler service accounts need roles/run.invoker on the job (listed in
+# invokers below); schedules with overrides need
+# roles/run.jobsExecutorWithOverrides (granted through iam).
+
+defaults:
+  region: europe-west1
+  labels:
+    team: data
+  jobs:
+    deletion_protection: false
+    template:
+      service_account: batch-runtime@${project_id}.iam.gserviceaccount.com
+      max_retries: 2
+      timeout: 1800s
+  job_container:
+    image: ${registry}/batch-tools:${version}
+    resources:
+      limits: { cpu: "1", memory: 1Gi }
+    env:
+      LOG_FORMAT: json
+
+jobs:
+  nightly-etl:
+    template:
+      task_count: 100
+      parallelism: 10
+      timeout: 7200s
+      max_retries: 5
+      vpc_access:
+        network_interfaces:
+          - { network: data-vpc, subnetwork: batch-europe-west1, tags: [batch] }
+        egress: ALL_TRAFFIC
+      containers:
+        - name: etl
+          command: [python, -m, etl]
+          args: [--mode=incremental]
+          resources:
+            limits: { cpu: "4", memory: 8Gi }
+          secret_env:
+            WAREHOUSE_PASSWORD: { secret: warehouse-password }
+          volume_mounts:
+            - { name: cloudsql, mount_path: /cloudsql }
+      volumes:
+        - name: cloudsql
+          cloud_sql_instance:
+            instances: ["${project_id}:europe-west1:warehouse"]
+    invokers:
+      - serviceAccount:batch-scheduler@${project_id}.iam.gserviceaccount.com
+    iam:
+      - role: roles/run.jobsExecutorWithOverrides
+        members: ["serviceAccount:batch-scheduler@${project_id}.iam.gserviceaccount.com"]
+    schedules:
+      nightly:
+        schedule: "0 2 * * *"
+        time_zone: Europe/Berlin
+        description: Incremental load every night.
+        service_account_email: batch-scheduler@${project_id}.iam.gserviceaccount.com
+        retry_config:
+          retry_count: 2
+          min_backoff_duration: 60s
+      monthly-full:
+        schedule: "0 1 1 * *"
+        time_zone: Europe/Berlin
+        description: Full reload on the first of the month.
+        service_account_email: batch-scheduler@${project_id}.iam.gserviceaccount.com
+        overrides:
+          args: [--mode=full]
+          task_count: 400
+          timeout: 14400s
+
+  db-migrate:
+    run_execution_token: ${version}      # a new version runs the migration once
+    template:
+      max_retries: 0
+      timeout: 600s
+      containers:
+        - image: ${registry}/migrations:${version}
+          secret_env:
+            DATABASE_URL: { secret: app-database-url, version: "4" }
+
+  thumbnail-backfill:
+    template:
+      task_count: 50
+      containers:
+        - args: [backfill-thumbnails, --batch-size=500]
+          env:
+            SOURCE_BUCKET: ${project_id}-images
+
+  cleanup:
+    template:
+      containers:
+        - args: [cleanup, --older-than=30d]
+    invokers:
+      - serviceAccount:workflows@${project_id}.iam.gserviceaccount.com

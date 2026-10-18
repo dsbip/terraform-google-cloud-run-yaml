@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=../../schemas/cloud-run-config.schema.json
+#
+# Basic example: one public Cloud Run service running Google's sample image.
+# The project and region come from the module's variables (see main.tf).
+
+services:
+  hello:
+    description: Public hello-world service.
+    # Examples are meant to be destroyed again; keep the provider default
+    # (true) for production services.
+    deletion_protection: false
+    template:
+      containers:
+        - image: us-docker.pkg.dev/cloudrun/container/hello
+          resources:
+            limits: { cpu: "1", memory: 512Mi }
+      scaling:
+        max_instance_count: 3
+    invokers:
+      - allUsers   # public: anyone can call the URL

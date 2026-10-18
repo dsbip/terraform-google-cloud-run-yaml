@@ -1,0 +1,60 @@
+# Live-test fixture: deployed by tests/python/test_live.py into a real
+# project. Every name starts with crun-<suffix>; revision changes a
+# description, a label and an environment variable to exercise in-place
+# updates.
+
+defaults:
+  labels:
+    purpose: terraform-module-test
+    run: ${suffix}
+  services:
+    deletion_protection: false
+    template:
+      scaling: { max_instance_count: 1 }
+  jobs:
+    deletion_protection: false
+  service_container:
+    resources:
+      limits: { cpu: "1", memory: 512Mi }
+    env:
+      REVISION: "${revision}"
+
+services:
+  hello:
+    name: crun-${suffix}-hello
+    description: Live test service, revision ${revision}
+    template:
+      containers:
+        - image: us-docker.pkg.dev/cloudrun/container/hello
+          startup_probe:
+            http_get: { path: / }
+          volume_mounts:
+            - { name: scratch, mount_path: /scratch }
+      volumes:
+        - name: scratch
+          empty_dir: { medium: MEMORY, size_limit: 16Mi }
+%{ if test_member != "" ~}
+    invokers: ["${test_member}"]
+%{ endif ~}
+
+jobs:
+  task:
+    name: crun-${suffix}-task
+    labels:
+      revision: "r${revision}"
+    template:
+      task_count: 1
+      max_retries: 0
+      timeout: 60s
+      containers:
+        - image: us-docker.pkg.dev/cloudrun/container/job
+          env:
+            REVISION: "${revision}"
+%{ if scheduler_service_account != "" ~}
+    invokers: ["serviceAccount:${scheduler_service_account}"]
+    schedules:
+      hourly:
+        schedule: "0 * * * *"
+        paused: true
+        service_account_email: ${scheduler_service_account}
+%{ endif ~}

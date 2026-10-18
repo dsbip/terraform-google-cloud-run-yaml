@@ -1,0 +1,366 @@
+# yaml-language-server: $schema=../../schemas/cloud-run-config.schema.json
+#
+# Complete example: every configuration key the module supports, across seven
+# services and four jobs (one of each disabled). Read it next to
+# docs/services.md and docs/jobs.md; tests/python/test_schema.py checks that
+# no key is missing here.
+
+project_id: ${project_id}
+
+defaults:
+  region: europe-west1
+  labels:
+    app: shop
+    owner: platform
+  services:
+    deletion_protection: false
+    labels:
+      kind: service
+    template:
+      service_account: shop-runtime@${project_id}.iam.gserviceaccount.com
+      execution_environment: EXECUTION_ENVIRONMENT_GEN2
+  jobs:
+    deletion_protection: false
+    template:
+      service_account: shop-batch@${project_id}.iam.gserviceaccount.com
+      max_retries: 2
+  service_container:
+    resources:
+      limits: { cpu: "1", memory: 512Mi }
+    env:
+      LOG_LEVEL: info
+  job_container:
+    image: ${registry}/batch:2.1.0
+    env:
+      LOG_FORMAT: json
+
+services:
+  # Public storefront: two containers, probes, volumes, VPC egress, traffic
+  # split, conditional IAM and a schedule.
+  storefront:
+    name: shop-storefront
+    description: Public storefront.
+    labels: { tier: critical }
+    annotations: { team-contact: storefront@example.com }
+    client: terraform
+    client_version: "1.9"
+    ingress: INGRESS_TRAFFIC_ALL
+    custom_audiences: [https://shop.example.com]
+    binary_authorization:
+      use_default: true
+    scaling:
+      min_instance_count: 1
+      max_instance_count: 60
+    template:
+      revision: shop-storefront-v42
+      labels: { release: v42 }
+      annotations: { release-notes: "https://example.com/releases/42" }
+      timeout: 60s
+      encryption_key: projects/${project_id}/locations/europe-west1/keyRings/shop/cryptoKeys/run
+      max_instance_request_concurrency: 100
+      session_affinity: true
+      health_check_disabled: false
+      scaling:
+        min_instance_count: 1
+        max_instance_count: 30
+      vpc_access:
+        network_interfaces:
+          - network: shop-vpc
+            subnetwork: shop-serverless
+            tags: [storefront]
+        egress: PRIVATE_RANGES_ONLY
+      containers:
+        - name: proxy
+          image: nginx:1.27-alpine
+          ports: { container_port: 8080, name: http1 }
+          depends_on: [app]
+          resources:
+            limits: { memory: 256Mi }
+            cpu_idle: true
+            startup_cpu_boost: true
+          liveness_probe:
+            initial_delay_seconds: 5
+            timeout_seconds: 2
+            period_seconds: 20
+            failure_threshold: 3
+            http_get:
+              path: /nginx-health
+              port: 8080
+              http_headers:
+                - { name: X-Probe, value: liveness }
+          volume_mounts:
+            - { name: cache, mount_path: /var/cache/nginx }
+            - { name: proxy-conf, mount_path: /etc/nginx/conf.d }
+        - name: app
+          image: ${registry}/storefront:v42
+          base_image_uri: europe-docker.pkg.dev/serverless-runtimes/google-22/runtimes/nodejs22
+          command: [node]
+          args: [server.js, --port=9000]
+          working_dir: /srv/app
+          resources:
+            limits: { cpu: "2", memory: 1Gi }
+          env:
+            PORT: 9000
+            CACHE_DIR: /var/cache/nginx
+          secret_env:
+            SESSION_SECRET: { secret: storefront-session, version: "5" }
+            PAYMENT_KEY: { secret: projects/shared-secrets/secrets/payment-key }
+          startup_probe:
+            tcp_socket: { port: 9000 }
+            period_seconds: 2
+            failure_threshold: 30
+          readiness_probe:
+            http_get: { path: /ready, port: 9000 }
+            failure_threshold: 3
+            success_threshold: 2
+            period_seconds: 5
+            timeout_seconds: 2
+          volume_mounts:
+            - { name: cache, mount_path: /var/cache/nginx }
+      volumes:
+        - name: cache
+          empty_dir: { medium: MEMORY, size_limit: 128Mi }
+        - name: proxy-conf
+          secret:
+            secret: storefront-nginx-conf
+            default_mode: "0444"
+            items:
+              - { path: default.conf, version: latest, mode: "0440" }
+    traffic:
+      - { type: REVISION, revision: shop-storefront-v41, percent: 90, tag: stable }
+      - { type: LATEST, percent: 10, tag: canary }
+    invokers: [allUsers]
+    iam:
+      - role: roles/run.developer
+        members: [group:storefront-devs@example.com, group:sre@example.com]
+      - role: roles/run.viewer
+        members: [user:auditor@example.com]
+        condition:
+          title: q4-audit
+          description: Read access during the Q4 audit.
+          expression: request.time < timestamp("2027-01-15T00:00:00Z")
+    schedules:
+      warmup:
+        schedule: "*/10 6-22 * * *"
+        time_zone: Europe/Berlin
+        description: Keeps caches warm during the day.
+        paused: false
+        region: europe-west3
+        service_account_email: shop-scheduler@${project_id}.iam.gserviceaccount.com
+        path: /internal/warm
+        http_method: POST
+        headers: { Content-Type: application/json }
+        body: '{"depth": 2}'
+        audience: https://shop.example.com
+        attempt_deadline: 120s
+        retry_config:
+          retry_count: 2
+          max_retry_duration: 600s
+          min_backoff_duration: 10s
+          max_backoff_duration: 120s
+          max_doublings: 3
+
+  # gRPC over a VPC connector, gRPC probes.
+  catalog:
+    description: Product catalog over gRPC.
+    template:
+      vpc_access:
+        connector: projects/${project_id}/locations/europe-west1/connectors/shop
+        egress: ALL_TRAFFIC
+      containers:
+        - image: ${registry}/catalog:3.0.0
+          ports: { container_port: 50051, name: h2c }
+          startup_probe:
+            grpc: { port: 50051, service: grpc.health.v1.Health }
+          liveness_probe:
+            grpc: { service: grpc.health.v1.Health }
+          readiness_probe:
+            grpc: { port: 50051 }
+    invokers: ["serviceAccount:shop-runtime@${project_id}.iam.gserviceaccount.com"]
+
+  # Back office: internal load balancer and IAP only, manual scaling,
+  # a specific Binary Authorization policy, deletion protection.
+  admin:
+    description: Back office behind IAP.
+    launch_stage: BETA
+    ingress: INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER
+    default_uri_disabled: true
+    iap_enabled: true
+    deletion_protection: true
+    deletion_policy: PREVENT
+    binary_authorization:
+      policy: projects/${project_id}/platforms/cloudRun/policies/strict
+      breakglass_justification: INC-1234 emergency rollout
+    scaling:
+      scaling_mode: MANUAL
+      manual_instance_count: 2
+    template:
+      containers:
+        - image: ${registry}/admin:1.2.0
+
+  # Reports in another project and region: Cloud SQL, Cloud Storage FUSE and
+  # NFS volumes, a sub_path mount.
+  reports:
+    project_id: shop-analytics
+    region: europe-west4
+    template:
+      timeout: 900s
+      containers:
+        - image: ${registry}/reports:4.0.0
+          resources:
+            limits: { cpu: "2", memory: 4Gi }
+          volume_mounts:
+            - { name: cloudsql, mount_path: /cloudsql }
+            - { name: exports, mount_path: /mnt/exports }
+            - { name: templates, mount_path: /mnt/templates, sub_path: reports }
+      volumes:
+        - name: cloudsql
+          cloud_sql_instance:
+            instances: ["shop-analytics:europe-west4:warehouse"]
+        - name: exports
+          gcs:
+            bucket: shop-analytics-exports
+            read_only: false
+            mount_options: [implicit-dirs]
+        - name: templates
+          nfs:
+            server: 10.40.0.2
+            path: /share
+            read_only: true
+    invokers: [group:finance@example.com]
+
+  # GPU inference.
+  recommender:
+    template:
+      gpu_zonal_redundancy_disabled: true
+      node_selector: { accelerator: nvidia-l4 }
+      containers:
+        - image: ${registry}/recommender:0.9.0
+          resources:
+            limits: { cpu: "8", memory: 32Gi, nvidia.com/gpu: "1" }
+            cpu_idle: false
+    invokers: ["serviceAccount:shop-runtime@${project_id}.iam.gserviceaccount.com"]
+
+  # Public without an allUsers grant: the IAM invoker check is disabled.
+  status:
+    invoker_iam_disabled: true
+    template:
+      containers:
+        - image: us-docker.pkg.dev/cloudrun/container/hello
+
+  # Kept in the file (and validated) but not deployed.
+  legacy-storefront:
+    enabled: false
+    template:
+      containers:
+        - image: ${registry}/storefront:v30
+
+jobs:
+  # Every job key and every template key.
+  etl:
+    name: shop-etl
+    labels: { pipeline: nightly }
+    annotations: { team-contact: data@example.com }
+    client: terraform
+    client_version: "1.9"
+    launch_stage: GA
+    deletion_policy: DELETE
+    binary_authorization:
+      use_default: true
+    start_execution_token: initial-load-1
+    template:
+      labels: { workload: etl }
+      annotations: { purpose: warehouse-load }
+      parallelism: 5
+      task_count: 50
+      max_retries: 3
+      timeout: 3600s
+      execution_environment: EXECUTION_ENVIRONMENT_GEN2
+      encryption_key: projects/${project_id}/locations/europe-west1/keyRings/shop/cryptoKeys/run
+      vpc_access:
+        network_interfaces:
+          - { network: shop-vpc, subnetwork: shop-batch }
+        egress: ALL_TRAFFIC
+      containers:
+        - name: etl
+          command: [python, -m, etl]
+          args: [--incremental]
+          working_dir: /app
+          depends_on: [proxy]
+          resources:
+            limits: { cpu: "4", memory: 8Gi }
+          env:
+            BATCH_SIZE: 5000
+          secret_env:
+            WAREHOUSE_PASSWORD: { secret: warehouse-password, version: latest }
+          volume_mounts:
+            - { name: work, mount_path: /work }
+        - name: proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.13.0
+          args: ["${project_id}:europe-west1:warehouse", --port=5432]
+          startup_probe:
+            initial_delay_seconds: 1
+            timeout_seconds: 1
+            period_seconds: 1
+            failure_threshold: 30
+            http_get:
+              path: /startup
+              port: 9090
+              http_headers:
+                - { name: X-Probe }
+      volumes:
+        - name: work
+          empty_dir: { size_limit: 2Gi }
+    invokers: ["serviceAccount:shop-scheduler@${project_id}.iam.gserviceaccount.com"]
+    iam:
+      - role: roles/run.jobsExecutorWithOverrides
+        members: ["serviceAccount:shop-scheduler@${project_id}.iam.gserviceaccount.com"]
+    schedules:
+      nightly:
+        schedule: "0 2 * * *"
+        time_zone: Europe/Berlin
+        description: Nightly incremental load.
+        paused: false
+        region: europe-west3
+        service_account_email: shop-scheduler@${project_id}.iam.gserviceaccount.com
+        attempt_deadline: 300s
+        retry_config:
+          retry_count: 1
+          min_backoff_duration: 60s
+      monthly-full:
+        schedule: "0 1 1 * *"
+        service_account_email: shop-scheduler@${project_id}.iam.gserviceaccount.com
+        overrides:
+          container: etl
+          args: [--full]
+          env: { BATCH_SIZE: 20000 }
+          task_count: 200
+          timeout: 10800s
+
+  # Runs on every release; apply waits for it to finish.
+  migrate:
+    run_execution_token: release-2026-10
+    template:
+      max_retries: 0
+      containers:
+        - image: ${registry}/migrations:2026.10
+          secret_env:
+            DATABASE_URL: { secret: shop-database-url }
+
+  # GPU batch job in another project and region.
+  embeddings:
+    project_id: shop-ml
+    region: us-central1
+    template:
+      gpu_zonal_redundancy_disabled: true
+      node_selector: { accelerator: nvidia-l4 }
+      containers:
+        - args: [compute-embeddings]
+          resources:
+            limits: { cpu: "8", memory: 32Gi, nvidia.com/gpu: "1" }
+
+  old-export:
+    enabled: false
+    template:
+      containers:
+        - args: [export]

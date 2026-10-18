@@ -1,0 +1,71 @@
+# yaml-language-server: $schema=../../schemas/cloud-run-config.schema.json
+#
+# One file for every environment. main.tf calls the module once per
+# environment with different template variables. Placeholders that contain
+# ": " or quotes are wrapped in single quotes, so the file is valid YAML both
+# before rendering (for editors) and after.
+#
+# Variables: env (dev, staging, prod), project_id, image_tag, min_instances,
+# max_instances.
+
+defaults:
+  region: europe-west1
+  labels:
+    environment: ${env}
+  services:
+    deletion_protection: ${env == "prod"}
+    template:
+      service_account: app-runtime@${project_id}.iam.gserviceaccount.com
+      scaling:
+        min_instance_count: ${min_instances}
+        max_instance_count: ${max_instances}
+  jobs:
+    deletion_protection: ${env == "prod"}
+  service_container:
+    resources:
+      limits:
+        cpu: "1"
+        memory: '${env == "prod" ? "2Gi" : "512Mi"}'
+    env:
+      ENVIRONMENT: ${env}
+
+services:
+  api:
+    template:
+      containers:
+        - image: europe-docker.pkg.dev/${project_id}/app/api:${image_tag}
+%{ if env == "prod" ~}
+          resources:
+            cpu_idle: false
+%{ endif ~}
+    invokers:
+%{ if env == "prod" ~}
+      - serviceAccount:gateway@${project_id}.iam.gserviceaccount.com
+%{ else ~}
+      - group:developers@example.com
+%{ endif ~}
+
+  # Preview environments for pull requests exist only in dev.
+  api-preview:
+    enabled: ${env == "dev"}
+    template:
+      containers:
+        - image: europe-docker.pkg.dev/${project_id}/app/api:pr-latest
+    invokers: [group:developers@example.com]
+
+jobs:
+  reindex:
+    template:
+      task_count: '${env == "prod" ? 20 : 2}'
+      containers:
+        - image: europe-docker.pkg.dev/${project_id}/app/jobs:${image_tag}
+          args: [reindex]
+%{ if env != "dev" ~}
+    invokers:
+      - serviceAccount:scheduler@${project_id}.iam.gserviceaccount.com
+    schedules:
+      nightly:
+        schedule: "0 3 * * *"
+        service_account_email: scheduler@${project_id}.iam.gserviceaccount.com
+        paused: ${env == "staging"}
+%{ endif ~}

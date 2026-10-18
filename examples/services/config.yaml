@@ -1,0 +1,120 @@
+# yaml-language-server: $schema=../../schemas/cloud-run-config.schema.json
+#
+# Several services with different runtime profiles, sharing defaults:
+#   - storefront   public web front end, scales to zero, startup CPU boost
+#   - orders-api   authenticated API: warm instances, always-on CPU,
+#                  probes, secrets, Serverless VPC Access connector
+#   - catalog-grpc gRPC (HTTP/2 end to end) with a gRPC health check
+#   - admin        reachable only through the internal load balancer, no
+#                  run.app URL, extra ID token audience
+#
+# defaults.services applies to every service, defaults.service_container to
+# every container. Mappings merge (the containers' env gets LOG_LEVEL plus
+# their own variables); lists replace.
+
+defaults:
+  region: ${region}
+  labels:
+    app: shop
+  services:
+    deletion_protection: false
+    ingress: INGRESS_TRAFFIC_ALL
+    template:
+      service_account: shop-runtime@${project_id}.iam.gserviceaccount.com
+      execution_environment: EXECUTION_ENVIRONMENT_GEN2
+      scaling:
+        max_instance_count: 20
+  service_container:
+    resources:
+      limits: { cpu: "1", memory: 512Mi }
+    env:
+      LOG_LEVEL: info
+      GOOGLE_CLOUD_PROJECT: ${project_id}
+
+services:
+  storefront:
+    description: Public web front end.
+    template:
+      max_instance_request_concurrency: 250
+      containers:
+        - image: ${registry}/storefront:${version}
+          ports: { container_port: 3000 }
+          resources:
+            startup_cpu_boost: true
+          env:
+            API_URL: https://orders-api-${project_number}.${region}.run.app   # deterministic URL
+    invokers: [allUsers]
+
+  orders-api:
+    description: Order API (authenticated).
+    labels:
+      tier: critical
+    template:
+      timeout: 30s
+      max_instance_request_concurrency: 80
+      scaling:
+        min_instance_count: 2              # merged with max_instance_count: 20
+        max_instance_count: 100
+      vpc_access:
+        connector: projects/${project_id}/locations/${region}/connectors/shop-connector
+        egress: PRIVATE_RANGES_ONLY
+      containers:
+        - image: ${registry}/orders-api:${version}
+          ports: { container_port: 8080 }
+          resources:
+            limits: { cpu: "2", memory: 1Gi }
+            cpu_idle: false                # CPU always allocated (background work)
+            startup_cpu_boost: true
+          env:
+            DB_HOST: 10.20.0.5
+          secret_env:
+            DB_PASSWORD: { secret: orders-db-password, version: "3" }
+            STRIPE_KEY: { secret: projects/shared-secrets/secrets/stripe-key }
+          startup_probe:
+            http_get: { path: /healthz/startup }
+            initial_delay_seconds: 2
+            period_seconds: 3
+            failure_threshold: 10
+          liveness_probe:
+            http_get:
+              path: /healthz/live
+              http_headers:
+                - { name: X-Probe, value: liveness }
+            period_seconds: 15
+          readiness_probe:
+            http_get: { path: /healthz/ready }
+            period_seconds: 5
+            success_threshold: 1
+            failure_threshold: 3
+    invokers:
+      - serviceAccount:shop-runtime@${project_id}.iam.gserviceaccount.com
+      - group:shop-developers@example.com
+    iam:
+      - role: roles/run.developer
+        members: [group:shop-oncall@example.com]
+
+  catalog-grpc:
+    description: Product catalog over gRPC.
+    template:
+      containers:
+        - image: ${registry}/catalog:${version}
+          ports: { container_port: 50051, name: h2c }
+          startup_probe:
+            grpc: { service: grpc.health.v1.Health }
+          liveness_probe:
+            grpc: {}
+    invokers:
+      - serviceAccount:shop-runtime@${project_id}.iam.gserviceaccount.com
+
+  admin:
+    description: Back office, only behind the internal load balancer.
+    ingress: INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER
+    default_uri_disabled: true
+    custom_audiences: [https://admin.shop.internal]
+    template:
+      session_affinity: true
+      containers:
+        - image: ${registry}/admin:${version}
+          resources:
+            limits: { memory: 1Gi }        # cpu "1" from defaults
+    invokers: [group:shop-admins@example.com]

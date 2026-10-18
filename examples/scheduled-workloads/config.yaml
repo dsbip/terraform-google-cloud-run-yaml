@@ -1,0 +1,78 @@
+# yaml-language-server: $schema=../../schemas/cloud-run-config.schema.json
+#
+# Cron-style work with Cloud Scheduler, for services and for jobs.
+#
+# Service schedules call an HTTP path of the service with an OIDC token
+# (audience: the service URL); job schedules execute the job through the Cloud
+# Run Admin API with an OAuth token. Either way the scheduler's service
+# account must be an invoker.
+
+defaults:
+  region: europe-west1
+  services:
+    deletion_protection: false
+  jobs:
+    deletion_protection: false
+
+services:
+  maintenance-api:
+    description: Exposes maintenance endpoints that the scheduler calls.
+    template:
+      containers:
+        - image: ${registry}/maintenance-api:1.4.0
+    invokers:
+      - serviceAccount:scheduler@${project_id}.iam.gserviceaccount.com
+    schedules:
+      cache-warmup:
+        schedule: "*/10 * * * *"
+        path: /tasks/warm-cache
+        http_method: GET
+        service_account_email: scheduler@${project_id}.iam.gserviceaccount.com
+        attempt_deadline: 60s
+      daily-digest:
+        schedule: "0 7 * * 1-5"
+        time_zone: America/New_York
+        description: Weekday digest e-mails at 7am New York time.
+        path: /tasks/digest
+        http_method: POST
+        headers:
+          Content-Type: application/json
+        body: '{"audience": "subscribers", "dry_run": false}'
+        service_account_email: scheduler@${project_id}.iam.gserviceaccount.com
+        retry_config:
+          retry_count: 3
+          min_backoff_duration: 30s
+          max_backoff_duration: 600s
+          max_doublings: 2
+          max_retry_duration: 1800s
+      quarterly-report:
+        schedule: "0 6 1 1,4,7,10 *"
+        path: /tasks/quarterly
+        service_account_email: scheduler@${project_id}.iam.gserviceaccount.com
+        audience: https://maintenance.example.com   # custom audience for the token
+        region: us-central1                          # scheduler in another region
+        paused: true                                 # created paused, resumed by hand
+
+jobs:
+  backup:
+    template:
+      containers:
+        - image: ${registry}/backup:3.2.0
+          args: ["--target=gs://${project_id}-backups"]
+    invokers:
+      - serviceAccount:scheduler@${project_id}.iam.gserviceaccount.com
+    schedules:
+      hourly:
+        schedule: "0 * * * *"
+        service_account_email: scheduler@${project_id}.iam.gserviceaccount.com
+      weekly-verify:
+        schedule: "30 3 * * 0"
+        time_zone: Europe/London
+        service_account_email: scheduler@${project_id}.iam.gserviceaccount.com
+        overrides:
+          args: [--verify-only, "--target=gs://${project_id}-backups"]
+          env: { VERIFY_DEPTH: full }
+          timeout: 3600s
+    iam:
+      - role: roles/run.jobsExecutorWithOverrides
+        members: ["serviceAccount:scheduler@${project_id}.iam.gserviceaccount.com"]
